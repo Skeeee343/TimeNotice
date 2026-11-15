@@ -77,10 +77,6 @@ jobs:
     - name: Setup MSBuild.exe
       uses: microsoft/setup-msbuild@v2
 
-    # Restore the solution
-#    - name: Restore the solution
-#      run: dotnet restore ${{ env.Solution_Folder}}
-
     # Build the solution
     - name: Build the solution
       run: dotnet build ${{ env.Solution_Folder }} --configuration ${{ matrix.configuration }} 
@@ -92,4 +88,12 @@ jobs:
     # Publish Folder
     - name: Publish the application
       run: dotnet publish ${{ env.Solution_Folder}} --configuration ${{ matrix.configuration }} -p:PublishSingleFile=true -p:SelfContained=true --output ${{ env.workingDirectory}}\publish
+
+    - name: Upload published application
+      uses: actions/upload-artifact@v4
+      with:
+        name: TimeNotice-${{ matrix.configuration }}
+        path: publish/
+        if-no-files-found: error
+        retention-days: 14
 
