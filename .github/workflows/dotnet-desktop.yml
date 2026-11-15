@@ -78,12 +78,12 @@ jobs:
       uses: microsoft/setup-msbuild@v2
 
     # Restore the solution
-    - name: Restore the solution
-      run: dotnet restore ${{ env.Solution_Folder}}
+#    - name: Restore the solution
+#      run: dotnet restore ${{ env.Solution_Folder}}
 
     # Build the solution
     - name: Build the solution
-      run: dotnet build ${{ env.SolutionFolder }} --configuration ${{ matrix.configuration }} 
+      run: dotnet build ${{ env.Solution_Folder }} --configuration ${{ matrix.configuration }} 
 
     # Execute all unit tests in the solution
     - name: Execute unit tests
