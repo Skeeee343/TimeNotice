@@ -80,7 +80,7 @@ jobs:
 
     # Execute all unit tests in the solution
     - name: Execute unit tests
-      run: dotnet test ../../src/TimeNotice/
+      run: dotnet test src/TimeNotice/
 
     # Restore the application to populate the obj folder with RuntimeIdentifiers
     - name: Restore the application
