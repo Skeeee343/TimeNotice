@@ -20,16 +20,17 @@ public partial class App : System.Windows.Application
     {
         base.OnStartup(e);
         // Single instance: second launch exits silently (tray already running).
-        try { _singleInstance = new Mutex(true, @"Local\TimeNotice-single", out var owned); if (!owned) { Shutdown(); return; } }
-        catch { /* fail-open: single user, second copy just runs */ }
+        try { _singleInstance = new Mutex(true, @"Local\TimeNotice-single", out var owned); 
+        if (!owned) { Shutdown(); return; } 
+        } catch { /* fail-open: single user, second copy just runs */ }
         DispatcherUnhandledException += (_, args) =>
         {
-            try { Logger.Log($"src=crash ui ex={args.Exception.GetType().Name} msg={args.Exception.Message}"); } catch { }
+            Logger.Log($"src=crash ui ex={args.Exception.GetType().Name} msg={args.Exception.Message}");
             args.Handled = true; // stay alive: tray app must not vanish on one bad tick
         };
         AppDomain.CurrentDomain.UnhandledException += (_, args) =>
         {
-            try { Logger.Log($"src=crash bg ex={args.ExceptionObject?.GetType().Name}"); } catch { }
+            Logger.Log($"src=crash bg ex={args.ExceptionObject?.GetType().Name}");
         };
         _settings = Settings.Load();
         try
@@ -37,7 +38,7 @@ public partial class App : System.Windows.Application
             var ver = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "?";
             Logger.Log($"src=startup ver=v{ver} os={Environment.OSVersion.VersionString} dir={Settings.Dir}");
         }
-        catch { }
+        catch { Logger.Log($"Unknown error has occured");}
         ApplyStartup();
         _overlay = new OverlayWindow(_settings);
         _overlay.Hidden += OnOverlayHidden;
@@ -105,8 +106,7 @@ public partial class App : System.Windows.Application
                 var exe = Environment.ProcessPath;
                 if (string.IsNullOrWhiteSpace(exe))
                 {
-                    try { exe = System.Diagnostics.Process.GetCurrentProcess().MainModule?.FileName; }
-                    catch { }
+                    exe = System.Diagnostics.Process.GetCurrentProcess().MainModule?.FileName;
                 }
                 if (!string.IsNullOrWhiteSpace(exe))
                 {
@@ -121,7 +121,7 @@ public partial class App : System.Windows.Application
                 Logger.Log("src=startup run=removed");
             }
         }
-        catch { }
+        catch { Logger.Log("startup Unsuccessful"); }
     }
 
     private void OpenSettings()
@@ -639,16 +639,12 @@ public partial class App : System.Windows.Application
                 foreach (var p in System.Diagnostics.Process.GetProcessesByName(procName))
                 {
                     any = true;
-                    try
-                    {
                         DateTime start;
                         try { start = p.StartTime.ToUniversalTime(); } // ponytail: UTC so DST shifts never move the session clock
                         catch { start = _startCache.TryGetValue(exe, out var old) ? old : DateTime.UtcNow; } // elevated: reuse first-seen start, never reset to now each tick
                         _startCache[exe] = start;
                         if (!found.TryGetValue(exe, out var cur) || start < cur)
                             found[exe] = start;
-                    }
-                    finally { p.Dispose(); }
                 }
                 if (!any) _startCache.Remove(exe); // exited: next launch is a new session
             }
