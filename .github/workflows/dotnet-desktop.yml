@@ -93,9 +93,3 @@ jobs:
     - name: Publish the application
       run: dotnet publish ${{ env.SolutionFolder}} --configuration ${{ matrix.configuration }} -p:PublishSingleFile=true -p:SelfContained=true --output ${{ env.workingDirectory}}\publish
 
-    # Upload
-    - name: Upload artifact
-      uses: actions/upload-artifact@v3
-      with:
-        name: TimeNotice-${{ matrix.configuration }}
-    
