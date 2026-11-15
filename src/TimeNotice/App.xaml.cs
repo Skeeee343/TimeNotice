@@ -7,6 +7,8 @@ namespace TimeNotice;
 public partial class App : System.Windows.Application
 {
     private static Mutex? _singleInstance;
+    private static EventWaitHandle? _exitEvent;
+    private const string ExitEventName = @"Local\TimeNotice-exit"; // per-session: matches the Local\ mutex scope over RDP
     private WinForms.NotifyIcon? _tray;
     private System.Drawing.Icon? _trayIcon;
     private System.Drawing.Icon? _trayIconDim; // cached once: dimmed face while suppressed, no per-tick handles
@@ -19,9 +21,13 @@ public partial class App : System.Windows.Application
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
-        // Single instance: second launch exits silently (tray already running).
-        try { _singleInstance = new Mutex(true, @"Local\TimeNotice-single", out var owned); if (!owned) { Shutdown(); return; } }
+        if (HasExitArg(e.Args)) { SignalRunningInstance(); Shutdown(); return; } // --exit: tell the tray copy to quit, never start UI
+        // Single instance: second launch asks the running copy to quit cleanly
+        // (its OnExit removes the tray icon), waits, and takes over. Falls back
+        // to silent exit when the running copy cannot be signalled (#43).
+        try { _singleInstance = new Mutex(true, @"Local\TimeNotice-single", out var owned); if (!owned && !TakeoverFromRunning()) { Shutdown(); return; } }
         catch { /* fail-open: single user, second copy just runs */ }
+        StartExitWatcher(); // first copy: a later launch or --exit shuts us down cleanly
         DispatcherUnhandledException += (_, args) =>
         {
             try { Logger.Log($"src=crash ui ex={args.Exception.GetType().Name} msg={args.Exception.Message}"); } catch { } // silent: crash handler must never throw
@@ -119,6 +125,68 @@ public partial class App : System.Windows.Application
             }
         }
         catch (Exception ex) { Logger.Log($"src=startup run=failed err={ex.GetType().Name}"); }
+    }
+
+    private static bool HasExitArg(string[] args)
+    {
+        try { return args.Any(a => a.Equals("--exit", StringComparison.OrdinalIgnoreCase)); }
+        catch { return false; } // fail-safe: unreadable args means start normally
+    }
+
+    private static void SignalRunningInstance()
+    {
+        try
+        {
+            using var ev = EventWaitHandle.OpenExisting(ExitEventName);
+            ev.Set();
+            Logger.Log("src=single-instance signalled-running");
+        }
+        catch (Exception ex) { Logger.Log($"src=single-instance signal-failed err={ex.GetType().Name}"); }
+    }
+
+    private void StartExitWatcher()
+    {
+        try
+        {
+            _exitEvent = new EventWaitHandle(false, EventResetMode.ManualReset, ExitEventName);
+            new Thread(WaitForExitSignal) { IsBackground = true }.Start();
+        }
+        catch (Exception ex) { Logger.Log($"src=single-instance watcher-failed err={ex.GetType().Name}"); }
+    }
+
+    private void WaitForExitSignal()
+    {
+        try
+        {
+            _exitEvent?.WaitOne();
+            Dispatcher.Invoke(Shutdown);
+        }
+        catch { } // silent: shutdown-path watcher must never throw
+    }
+
+    // Ask the running copy to quit, wait for its mutex, take over. Signal and
+    // each acquire own their failure; retries cover a slow OnExit (#43).
+    private static bool TakeoverFromRunning()
+    {
+        SignalRunningInstance();
+        for (var i = 0; i < 10; i++)
+        {
+            Thread.Sleep(500);
+            if (TryAcquireSingleInstance()) return true;
+        }
+        Logger.Log("src=single-instance takeover-failed");
+        return false;
+    }
+
+    private static bool TryAcquireSingleInstance()
+    {
+        try
+        {
+            _singleInstance?.Dispose();
+            _singleInstance = new Mutex(true, @"Local\TimeNotice-single", out var owned);
+            return owned;
+        }
+        catch { return false; } // fail-safe: no takeover, caller exits silently
     }
 
     private static string? ResolveOwnExe()
@@ -1003,6 +1071,8 @@ public partial class App : System.Windows.Application
         try { _trayIconDim?.Dispose(); } catch { } // silent: shutdown teardown must never throw
         try { _singleInstance?.ReleaseMutex(); _singleInstance?.Dispose(); } catch { } // silent: shutdown teardown must never throw
         _singleInstance = null;
+        try { _exitEvent?.Dispose(); } catch { } // silent: shutdown teardown must never throw
+        _exitEvent = null;
         base.OnExit(e);
     }
 
