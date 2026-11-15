@@ -79,7 +79,7 @@ jobs:
 
     # Restore the solution
     - name: Restore the solution
-      run: dotnet restore {{ env.SolutionFolder}}
+      run: dotnet restore {{ env.Solution_Folder}}
 
     # Build the solution
     - name: Build the solution
@@ -87,9 +87,9 @@ jobs:
 
     # Execute all unit tests in the solution
     - name: Execute unit tests
-      run: dotnet test {{ env.SolutionFolder}}
+      run: dotnet test {{ env.Solution_Folder}}
   
     # Publish Folder
     - name: Publish the application
-      run: dotnet publish ${{ env.SolutionFolder}} --configuration ${{ matrix.configuration }} -p:PublishSingleFile=true -p:SelfContained=true --output ${{ env.workingDirectory}}\publish
+      run: dotnet publish ${{ env.Solution_Folder}} --configuration ${{ matrix.configuration }} -p:PublishSingleFile=true -p:SelfContained=true --output ${{ env.workingDirectory}}\publish
 
