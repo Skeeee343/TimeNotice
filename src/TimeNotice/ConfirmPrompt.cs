@@ -63,7 +63,7 @@ public sealed class ConfirmPrompt : IDisposable
     private static bool IsDown(int vk)
     {
         try { return (GetAsyncKeyState(vk) & 0x8000) != 0; }
-        catch { return false; }
+        catch { return false; } // silent: 100ms hot poll, fail-open means key not pressed
     }
 
     private string PromptMain() => $"{_display} Detected";
@@ -78,6 +78,8 @@ public sealed class ConfirmPrompt : IDisposable
         // The auto line marks whichever outcome the timeout applies (Settings → Popup → Confirm prompt).
         if (_settings.ConfirmTimeoutAction.Equals("Reject", StringComparison.OrdinalIgnoreCase))
             return $"Ctrl+Alt+Z — Accept\nCtrl+Alt+X — Reject (auto in {secs}s)";
+        if (_settings.ConfirmTimeoutAction.Equals("DoNothing", StringComparison.OrdinalIgnoreCase))
+            return $"Ctrl+Alt+Z — Accept\nCtrl+Alt+X — Reject\nTimeout — ask again, nothing saved ({secs}s)";
         return $"Ctrl+Alt+Z — Accept (auto in {secs}s)\nCtrl+Alt+X — Reject";
     }
 
@@ -106,15 +108,17 @@ public sealed class ConfirmPrompt : IDisposable
     {
         if (_done) return;
         _done = true;
-        try { _poll?.Stop(); } catch { }
-        try { _overlay.HideNow(); } catch { }
+        try { _poll?.Stop(); } catch { } // silent: teardown must never throw
+        try { _overlay.HideNow(); } catch { } // silent: teardown must never throw
         try
         {
             var timeout = choice.StartsWith("timeout", StringComparison.OrdinalIgnoreCase);
+            var timeoutNothing = timeout && _settings.ConfirmTimeoutAction.Equals("DoNothing", StringComparison.OrdinalIgnoreCase); // missed while AFK: write nothing, ask again next session
             var timeoutAccepts = _settings.ConfirmTimeoutAction.Equals("Accept", StringComparison.OrdinalIgnoreCase);
             var accept = choice.StartsWith("accept-key", StringComparison.OrdinalIgnoreCase)
                 || (timeout && timeoutAccepts);
             if (!_persist) { /* dry-run test: never write */ }
+            else if (timeoutNothing) { /* AFK miss: Games/Ignored untouched, _detectSeen untouched */ }
             else if (accept)
             {
                 var raw = _exe;
@@ -123,14 +127,14 @@ public sealed class ConfirmPrompt : IDisposable
                     raw = $"{_exe} = {_display}"; // friendly name from window title, e.g. javaw.exe = Minecraft
                 _settings.AddGameExe(raw); // sanitized + merged inside; timeout-accept honors the configured action
             }
-            else if (choice.StartsWith("reject", StringComparison.OrdinalIgnoreCase) || timeout)
+            else if (!timeoutNothing && (choice.StartsWith("reject", StringComparison.OrdinalIgnoreCase) || timeout))
             {
                 _settings.AddIgnoreExe(_exe);
             }
         }
-        catch { }
+        catch (Exception ex) { Log($"src=confirm-write-failed choice={choice} exe={_exe} err={ex.GetType().Name}"); }
         Log($"src=confirm-result choice={choice} exe={_exe}");
-        try { _onDone(choice, _exe); } catch { }
+        try { _onDone(choice, _exe); } catch { } // silent: receipt path must survive a late shutdown
     }
 
     private static void Log(string msg)
@@ -140,7 +144,7 @@ public sealed class ConfirmPrompt : IDisposable
 
     public void Dispose()
     {
-        try { _poll?.Stop(); } catch { }
+        try { _poll?.Stop(); } catch { } // silent: teardown must never throw
         _done = true;
     }
 }

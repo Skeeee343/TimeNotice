@@ -51,7 +51,7 @@ public sealed class Settings
     public int HeuristicInactiveMinutes { get; set; } = 5; // SUSPECT age before INACTIVE/close
     public int HeuristicGpuPercent { get; set; } = 10; // per-process GPU Engine % counts as active
     public int ConfirmTimeoutSeconds { get; set; } = 30; // sticky confirm countdown; timeout applies ConfirmTimeoutAction
-    public string ConfirmTimeoutAction { get; set; } = "Accept"; // Accept | Reject — what a missed confirm does
+    public string ConfirmTimeoutAction { get; set; } = "Accept"; // Accept | Reject | DoNothing — what a missed confirm does
     [System.Text.Json.Serialization.JsonIgnore]
     public bool WasResetFromCorrupt { get; private set; } // set only by Load's catch path, never persisted
     [System.Text.Json.Serialization.JsonIgnore]
@@ -80,6 +80,19 @@ public sealed class Settings
         return reset;
     }
 
+    // Flat single-try backup helper so Load never nests a try (#42).
+    private static string? TryBackupCorrupt()
+    {
+        try
+        {
+            Directory.CreateDirectory(Dir);
+            var backup = System.IO.Path.Combine(Dir, $"settings.corrupt-{DateTime.Now:yyyyMMdd-HHmmss}.json");
+            File.Copy(Path, backup, overwrite: false);
+            return backup;
+        }
+        catch { return null; } // silent: backup is best-effort, defaults load regardless
+    }
+
     public static Settings Load()
     {
         Settings s;
@@ -99,15 +112,7 @@ public sealed class Settings
         catch
         {
             // ponytail: corrupt config keeps a backup for diagnosis, then falls back to defaults
-            string? backup = null;
-            try
-            {
-                Directory.CreateDirectory(Dir);
-                backup = System.IO.Path.Combine(Dir, $"settings.corrupt-{DateTime.Now:yyyyMMdd-HHmmss}.json");
-                File.Copy(Path, backup, overwrite: false);
-            }
-            catch { backup = null; }
-            return SeedWithReset(backup);
+            return SeedWithReset(TryBackupCorrupt());
         }
         if (s.GeneralMinutes <= 0) s.GeneralMinutes = s.ReminderMinutes > 0 ? s.ReminderMinutes : 30; // migrate Phase 2 file
         s.ReminderMinutes = s.GeneralMinutes; // keep legacy in sync
@@ -157,7 +162,8 @@ public sealed class Settings
     {
         if (ConfirmTimeoutSeconds < 5 || ConfirmTimeoutSeconds > 120) ConfirmTimeoutSeconds = 30;
         if (!ConfirmTimeoutAction.Equals("Accept", StringComparison.OrdinalIgnoreCase)
-            && !ConfirmTimeoutAction.Equals("Reject", StringComparison.OrdinalIgnoreCase))
+            && !ConfirmTimeoutAction.Equals("Reject", StringComparison.OrdinalIgnoreCase)
+            && !ConfirmTimeoutAction.Equals("DoNothing", StringComparison.OrdinalIgnoreCase))
             ConfirmTimeoutAction = "Accept";
         if (!TimeSpan.TryParse(WindowStart, out _)) WindowStart = "09:00";
         if (!TimeSpan.TryParse(WindowEnd, out _)) WindowEnd = "23:00";

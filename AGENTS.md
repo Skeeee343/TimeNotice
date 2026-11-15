@@ -34,6 +34,11 @@ User is PM (no app-dev experience). Agent owns all code/docs. Explain in plain l
 - Thresholds + exe names configurable, never hardcoded. Silent unknown-exe handling (log + tray hint).
 - Keep diffs minimal, fewest files, stdlib/Win32 first. Mark shortcuts with `// ponytail: <ceiling>, <upgrade path>`.
 
+## Reliability bar (corporate-grade: users must trust this on their gaming PC)
+- No silent failures: every `catch` either logs (`Logger.Log` with a `src=` token, cold paths only) or carries a `// silent: <reason>` / `// fail-safe:` comment. Never log from inside `Logger` itself (recursion) or from 1s/5s hot-path ticks (spam — fail-open with reason instead). Teardown/`Dispose` catches stay silent with reason. No PII beyond local exe names already in debug.log; no telemetry, no cloud.
+- No nested `try` in one method: extract a helper with its own single try (see `ApplyStartup`/`TryBackupCorrupt`). Documented fallback-value nesting (e.g. `ForegroundDiag` module→name→unresolved) is the one exception, with a comment saying so.
+- `dotnet build` must stay 0 warnings 0 errors; verify before every commit and release.
+
 ## Skill routing
 
 When the user's request matches an available skill, invoke it via the Skill tool. When in doubt, invoke the skill.

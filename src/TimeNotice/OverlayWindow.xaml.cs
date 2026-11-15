@@ -87,7 +87,7 @@ public partial class OverlayWindow : Window
         _hideTimer.Stop();
         BeginAnimation(OpacityProperty, null);
         Hide();
-        try { Hidden?.Invoke(); } catch { }
+        try { Hidden?.Invoke(); } catch { } // silent: teardown must never throw
     }
 
     private void ApplyTheme()
@@ -115,23 +115,22 @@ public partial class OverlayWindow : Window
         TimeText.Foreground = new System.Windows.Media.SolidColorBrush(ParseColor(fg, "#FFFFFFFF"));
         SubText.Foreground = new System.Windows.Media.SolidColorBrush(ParseColor(sub, "#FFBBBBBB"));
         ExeText.Foreground = SubText.Foreground;
-        // Box and text fade on their own: window stays opaque so the fade-out
-        // animation still has full range. Box off = transparent background.
+        // Box opacity is baked into the fill alpha only; the Border itself stays
+        // at 1.0 so the text keeps its own opacity (#35: Border.Opacity would
+        // multiply down into the child TextBlocks and ghost the text).
         Opacity = 1.0;
         var boxOp = Math.Clamp(_settings.Opacity, 0.2, 1.0);
         if (!_settings.ShowBox)
         {
             PopupBorder.Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Colors.Transparent);
-            PopupBorder.Opacity = 1.0;
         }
-        else if (boxOp >= 1.0)
+        else
         {
-            // 100% means fully blocked out: drop any translucency baked into the fill.
-            var solid = ParseColor(bg, "#CC1E1E1E"); solid.A = 255;
-            PopupBorder.Background = new System.Windows.Media.SolidColorBrush(solid);
-            PopupBorder.Opacity = 1.0;
+            var fill = ParseColor(bg, "#CC1E1E1E");
+            fill.A = boxOp >= 1.0 ? (byte)255 : (byte)Math.Clamp(fill.A * boxOp, 0, 255); // 100% still fully blocks out (#28)
+            PopupBorder.Background = new System.Windows.Media.SolidColorBrush(fill);
         }
-        else PopupBorder.Opacity = boxOp;
+        PopupBorder.Opacity = 1.0;
         var top = Math.Clamp(_settings.TextOpacity, 0.2, 1.0);
         TimeText.Opacity = top;
         SubText.Opacity = top;
@@ -147,7 +146,7 @@ public partial class OverlayWindow : Window
                 var c = System.Windows.Media.ColorConverter.ConvertFromString(candidate.Trim());
                 if (c is System.Windows.Media.Color color) return color;
             }
-            catch { }
+            catch { } // silent: try the fallback string next
         }
         return System.Windows.Media.Colors.Black;
     }
@@ -161,7 +160,7 @@ public partial class OverlayWindow : Window
                 "AppsUseLightTheme", 0);
             if (v is int i) return i != 0;
         }
-        catch { }
+        catch { } // silent: fail-dark when unknown
         return false; // fail-dark when unknown
     }
 
@@ -184,7 +183,7 @@ public partial class OverlayWindow : Window
                     // Never the focused game's DPI: a DPI-unaware game (javaw.exe = 96)
                     // would give scale 1 and push the corner off-screen.
                     double scale = 1.0;
-                    try { scale = System.Windows.Media.VisualTreeHelper.GetDpi(this).DpiScaleX; } catch { }
+                    try { scale = System.Windows.Media.VisualTreeHelper.GetDpi(this).DpiScaleX; } catch { } // silent: fail-safe to scale 1.0 below
                     if (scale <= 0) scale = 1.0;
                     var tl = new System.Windows.Point(mi.rcWork.Left / scale, mi.rcWork.Top / scale);
                     var br = new System.Windows.Point(mi.rcWork.Right / scale, mi.rcWork.Bottom / scale);
@@ -222,7 +221,7 @@ public partial class OverlayWindow : Window
     {
         _hideTimer.Stop();
         var anim = new DoubleAnimation(0, TimeSpan.FromMilliseconds(400));
-        anim.Completed += (_, _) => { Hide(); try { Hidden?.Invoke(); } catch { } };
+        anim.Completed += (_, _) => { Hide(); try { Hidden?.Invoke(); } catch { } }; // silent: teardown must never throw
         BeginAnimation(OpacityProperty, anim);
     }
 

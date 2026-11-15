@@ -20,17 +20,16 @@ public partial class App : System.Windows.Application
     {
         base.OnStartup(e);
         // Single instance: second launch exits silently (tray already running).
-        try { _singleInstance = new Mutex(true, @"Local\TimeNotice-single", out var owned); 
-        if (!owned) { Shutdown(); return; } 
-        } catch { /* fail-open: single user, second copy just runs */ }
+        try { _singleInstance = new Mutex(true, @"Local\TimeNotice-single", out var owned); if (!owned) { Shutdown(); return; } }
+        catch { /* fail-open: single user, second copy just runs */ }
         DispatcherUnhandledException += (_, args) =>
         {
-            Logger.Log($"src=crash ui ex={args.Exception.GetType().Name} msg={args.Exception.Message}");
+            try { Logger.Log($"src=crash ui ex={args.Exception.GetType().Name} msg={args.Exception.Message}"); } catch { } // silent: crash handler must never throw
             args.Handled = true; // stay alive: tray app must not vanish on one bad tick
         };
         AppDomain.CurrentDomain.UnhandledException += (_, args) =>
         {
-            Logger.Log($"src=crash bg ex={args.ExceptionObject?.GetType().Name}");
+            try { Logger.Log($"src=crash bg ex={args.ExceptionObject?.GetType().Name}"); } catch { } // silent: crash handler must never throw
         };
         _settings = Settings.Load();
         try
@@ -38,7 +37,7 @@ public partial class App : System.Windows.Application
             var ver = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "?";
             Logger.Log($"src=startup ver=v{ver} os={Environment.OSVersion.VersionString} dir={Settings.Dir}");
         }
-        catch { Logger.Log($"Unknown error has occured");}
+        catch { } // silent: Logger itself is down, nothing to log with
         ApplyStartup();
         _overlay = new OverlayWindow(_settings);
         _overlay.Hidden += OnOverlayHidden;
@@ -84,30 +83,28 @@ public partial class App : System.Windows.Application
                         : $"The settings file was unreadable. A backup was saved at {where}.",
                     WinForms.ToolTipIcon.Warning);
             }
-            catch { }
+            catch (Exception ex) { Logger.Log($"src=config-reset balloon-failed err={ex.GetType().Name}"); }
         }
         StartScheduler();
     }
 
     // Phase 6: Registry Run entry (HKCU, no elevation). Called on startup
     // and after every Settings save (SettingsWindow passes ApplyStartup).
+    // Flat single try (#42): exe resolution and value deletion each own their
+    // try inside their helper, so this method never nests a try statement.
     public void ApplyStartup()
     {
         try
         {
             using var run = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(
                 @"Software\Microsoft\Windows\CurrentVersion\Run", writable: true);
-            if (run is null) return;
+            if (run is null) { Logger.Log("src=startup run=<no-key>"); return; }
             if (_settings.StartWithWindows)
             {
                 // Prefer the runtime path (MainModule can be null); the single
                 // Run value is overwritten each launch, so a new beta exe in a
                 // new folder repoints autostart at itself — no stale duplicate.
-                var exe = Environment.ProcessPath;
-                if (string.IsNullOrWhiteSpace(exe))
-                {
-                    exe = System.Diagnostics.Process.GetCurrentProcess().MainModule?.FileName;
-                }
+                var exe = ResolveOwnExe();
                 if (!string.IsNullOrWhiteSpace(exe))
                 {
                     run.SetValue("TimeNotice", $"\"{exe}\"");
@@ -117,11 +114,25 @@ public partial class App : System.Windows.Application
             }
             else
             {
-                try { run.DeleteValue("TimeNotice", throwOnMissingValue: false); } catch { }
+                TryDeleteRunValue(run);
                 Logger.Log("src=startup run=removed");
             }
         }
-        catch { Logger.Log("startup Unsuccessful"); }
+        catch (Exception ex) { Logger.Log($"src=startup run=failed err={ex.GetType().Name}"); }
+    }
+
+    private static string? ResolveOwnExe()
+    {
+        var exe = Environment.ProcessPath;
+        if (!string.IsNullOrWhiteSpace(exe)) return exe;
+        try { return System.Diagnostics.Process.GetCurrentProcess().MainModule?.FileName; }
+        catch (Exception ex) { Logger.Log($"src=startup run=<unresolved> err={ex.GetType().Name}"); return null; }
+    }
+
+    private static void TryDeleteRunValue(Microsoft.Win32.RegistryKey run)
+    {
+        try { run.DeleteValue("TimeNotice", throwOnMissingValue: false); }
+        catch (Exception ex) { Logger.Log($"src=startup run=remove-failed err={ex.GetType().Name}"); }
     }
 
     private void OpenSettings()
@@ -163,7 +174,7 @@ public partial class App : System.Windows.Application
                 _tray.Icon = (suppressed && _trayIconDim is not null) ? _trayIconDim : _trayIcon;
             }
         }
-        catch { }
+        catch (Exception ex) { Logger.Log($"src=tray refresh-failed err={ex.GetType().Name}"); }
     }
 
     private void StartScheduler()
@@ -543,7 +554,7 @@ public partial class App : System.Windows.Application
                 }
                 lastGpu = sample is null ? "n/a" : $"{sample:F0}%";
             }
-            catch { lastGpu = "n/a"; }
+            catch { lastGpu = "n/a"; } // fail-safe: read-only Detect label, n/a means no sample
             var lastLine = string.IsNullOrWhiteSpace(lastFg) ? "none yet" : $"{lastFg} (GPU {lastGpu})";
         // Live read (issue #10): pid + title + resolve source so a game that
         // never appears in last-focus is provable (protected handle vs alias).
@@ -557,7 +568,7 @@ public partial class App : System.Windows.Application
                 ? $"unresolved (pid {livePid}, via {liveSrc}) title=\"{shortTitle}\""
                 : $"{liveExe} (pid {livePid}, via {liveSrc}) title=\"{shortTitle}\"";
         }
-        catch { liveLine = "unavailable"; }
+        catch { liveLine = "unavailable"; } // fail-safe: read-only Detect label, unavailable means no live read
             string session = "none";
             if (!string.IsNullOrWhiteSpace(_gameSessionExe))
                 session = $"{GameDisplayName(_gameSessionExe)} — {FormatElapsed(DateTime.UtcNow - _gameSessionStart)}";
@@ -584,7 +595,7 @@ public partial class App : System.Windows.Application
                 status += "\n\nTop GPU: engine counters unavailable on this machine.";
             return status;
         }
-        catch { return "Status unavailable."; }
+        catch { return "Status unavailable."; } // fail-safe: read-only Detect label never throws
     }
 
     private List<(uint Pid, string Exe, double Gpu)> _topSnap = new();
@@ -603,7 +614,7 @@ public partial class App : System.Windows.Application
             _topSnap = _gpu.SnapshotTop(TopGpuCount);
             _topSnapUtc = DateTime.UtcNow;
         }
-        catch { }
+        catch { } // silent: 5s hot poll, stale snapshot reused; logging every tick would spam
         return _topSnap;
     }
 
@@ -638,17 +649,20 @@ public partial class App : System.Windows.Application
                 var any = false;
                 foreach (var p in System.Diagnostics.Process.GetProcessesByName(procName))
                 {
-                    any = true;
+                    using (p) // restore: Process holds a native handle; never leak one per 5s tick
+                    {
+                        any = true;
                         DateTime start;
                         try { start = p.StartTime.ToUniversalTime(); } // ponytail: UTC so DST shifts never move the session clock
                         catch { start = _startCache.TryGetValue(exe, out var old) ? old : DateTime.UtcNow; } // elevated: reuse first-seen start, never reset to now each tick
                         _startCache[exe] = start;
                         if (!found.TryGetValue(exe, out var cur) || start < cur)
                             found[exe] = start;
+                    }
                 }
                 if (!any) _startCache.Remove(exe); // exited: next launch is a new session
             }
-            catch { } // ponytail: silent unknown-exe, tray hint only
+            catch { } // silent: 5s hot poll, unknown exe means not running; tray hint covers it
         }
         return found;
     }
@@ -855,9 +869,9 @@ public partial class App : System.Windows.Application
 
     private void OnTestConfirmDone(string choice, string exe)
     {
-        try { _confirm?.Dispose(); } catch { }
+        try { _confirm?.Dispose(); } catch { } // silent: teardown must never throw
         _confirm = null;
-        try { _drainTimer?.Stop(); } catch { }
+        try { _drainTimer?.Stop(); } catch { } // silent: teardown must never throw
         if (NotificationPolicy.ShouldSuppress(NotificationPolicy.ForegroundExe(), _settings)) { Logger.Log("src=suppressed-at-show orig=confirm-test-done"); return; } // Quiet/Pause entered during confirm: no receipt
         ShowOrQueue("Test popup — nothing saved.", "Games and Ignored lists unchanged.", "confirm-test-done");
     }
@@ -866,17 +880,23 @@ public partial class App : System.Windows.Application
     {
         _queuedMain = null;
         _queuedSub = null;
-        try { _drainTimer?.Stop(); } catch { }
+        try { _drainTimer?.Stop(); } catch { } // silent: teardown must never throw
     }
 
     private void OnConfirmDone(string choice, string exe)
     {
-        try { _confirm?.Dispose(); } catch { }
+        try { _confirm?.Dispose(); } catch { } // silent: teardown must never throw
         _confirm = null;
-        try { _drainTimer?.Stop(); } catch { } // stale drain must not overwrite the receipt
+        try { _drainTimer?.Stop(); } catch { } // silent: stale drain must not overwrite the receipt
+        var timeout = choice.StartsWith("timeout", StringComparison.OrdinalIgnoreCase);
+        if (timeout && _settings.ConfirmTimeoutAction.Equals("DoNothing", StringComparison.OrdinalIgnoreCase))
+        {
+            Logger.Log($"src=confirm-result choice=timeout-nothing exe={exe}"); // AFK miss: nothing saved, no receipt, re-prompts next session
+            return;
+        }
         var timeoutAccepts = _settings.ConfirmTimeoutAction.Equals("Accept", StringComparison.OrdinalIgnoreCase);
         var accepted = choice.StartsWith("accept-key", StringComparison.OrdinalIgnoreCase)
-            || (choice.StartsWith("timeout", StringComparison.OrdinalIgnoreCase) && timeoutAccepts);
+            || (timeout && timeoutAccepts);
         if (accepted) { _detectSeen.Add(exe); if (_settings.IgnoreExes.RemoveAll(l => SameExe(ParseGameEntry(l).Exe, exe)) > 0) _settings.Save(); } // move semantics: Games owns it now
         else if (_settings.GameExes.RemoveAll(l => SameExe(ParseGameEntry(l).Exe, exe)) > 0) _settings.Save(); // move semantics: Ignored owns it now
         var display = GameDisplayName(exe);
@@ -976,12 +996,12 @@ public partial class App : System.Windows.Application
 
     protected override void OnExit(ExitEventArgs e)
     {
-        try { Microsoft.Win32.SystemEvents.PowerModeChanged -= OnPowerMode; } catch { }
-        try { _gpu?.Dispose(); } catch { }
+        try { Microsoft.Win32.SystemEvents.PowerModeChanged -= OnPowerMode; } catch { } // silent: shutdown teardown must never throw
+        try { _gpu?.Dispose(); } catch { } // silent: shutdown teardown must never throw
         if (_tray is not null) { _tray.Visible = false; _tray.Dispose(); }
-        try { _trayIcon?.Dispose(); } catch { }
-        try { _trayIconDim?.Dispose(); } catch { }
-        try { _singleInstance?.ReleaseMutex(); _singleInstance?.Dispose(); } catch { }
+        try { _trayIcon?.Dispose(); } catch { } // silent: shutdown teardown must never throw
+        try { _trayIconDim?.Dispose(); } catch { } // silent: shutdown teardown must never throw
+        try { _singleInstance?.ReleaseMutex(); _singleInstance?.Dispose(); } catch { } // silent: shutdown teardown must never throw
         _singleInstance = null;
         base.OnExit(e);
     }
@@ -998,6 +1018,6 @@ public partial class App : System.Windows.Application
                 HeurReset("power");
             });
         }
-        catch { }
+        catch (Exception ex) { Logger.Log($"src=power dispatch-failed err={ex.GetType().Name}"); }
     }
 }

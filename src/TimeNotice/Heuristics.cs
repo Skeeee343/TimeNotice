@@ -48,7 +48,7 @@ public static class Heuristics
             GetWindowThreadProcessId(hwnd, out var pid);
             return pid;
         }
-        catch { return 0; }
+        catch { return 0; } // silent: 5s hot poll, fail-open means no foreground pid
     }
 
     public static int IdleSeconds()
@@ -59,7 +59,7 @@ public static class Heuristics
             if (!GetLastInputInfo(ref info)) return 0; // fail-open: assume active
             return (int)(unchecked((uint)Environment.TickCount - info.dwTime) / 1000);
         }
-        catch { return 0; }
+        catch { return 0; } // silent: 5s hot poll, fail-open assumes active
     }
 
     // True when the foreground window covers its whole monitor (exclusive
@@ -82,7 +82,7 @@ public static class Heuristics
                 && Math.Abs(r.Right - mi.rcMonitor.Right) <= tol
                 && Math.Abs(r.Bottom - mi.rcMonitor.Bottom) <= tol;
         }
-        catch { return false; }
+        catch { return false; } // silent: 5s hot poll, fail-open means not fullscreen
     }
 
     // GPU Engine sampler via Microsoft's PerformanceCounter package (no raw
@@ -126,12 +126,12 @@ public static class Heuristics
                 {
                     if (!name.Contains(tag, StringComparison.OrdinalIgnoreCase)) continue;
                     matched++;
-                    try { sum += c.NextValue(); } catch { }
+                    try { sum += c.NextValue(); } catch { } // silent: 5s hot poll, skip dead counter
                 }
                 if (matched == 0) return null;
                 return sum;
             }
-            catch { return null; }
+            catch { return null; } // silent: 5s hot poll, unknown reads as no GPU, never as 0%
         }
 
         private void Refresh(string tag)
@@ -143,11 +143,11 @@ public static class Heuristics
                 var cat = new System.Diagnostics.PerformanceCounterCategory("GPU Engine");
                 names = cat.GetInstanceNames();
             }
-            catch { Available = false; return; }
+            catch { Available = false; return; } // silent: 5s hot poll, category gone means no GPU
             var wanted = new HashSet<string>(names.Where(n => n.Contains(tag, StringComparison.OrdinalIgnoreCase)), StringComparer.OrdinalIgnoreCase);
             foreach (var dead in _counters.Keys.Where(k => !wanted.Contains(k)).ToList())
             {
-                try { _counters[dead].Dispose(); } catch { }
+                try { _counters[dead].Dispose(); } catch { } // silent: teardown must never throw
                 _counters.Remove(dead);
             }
             foreach (var name in wanted)
@@ -159,7 +159,7 @@ public static class Heuristics
                     _ = c.NextValue(); // prime at creation; readings valid from the next tick
                     _counters[name] = c;
                 }
-                catch { }
+                catch { } // silent: 5s hot poll, instance vanished between list and open
             }
             // no _primed reset: existing counters keep valid readings; new ones were primed above
         }
@@ -183,7 +183,7 @@ public static class Heuristics
                     var pid = ParsePid(name);
                     if (pid is null) continue;
                     double v;
-                    try { v = c.NextValue(); } catch { continue; }
+                    try { v = c.NextValue(); } catch { continue; } // silent: 5s hot poll, skip dead counter
                     sums[pid.Value] = sums.GetValueOrDefault(pid.Value) + v;
                 }
                 foreach (var (pid, sum) in sums.OrderByDescending(kv => kv.Value).Take(Math.Max(1, count)))
@@ -195,7 +195,7 @@ public static class Heuristics
                     top.Add((pid, exe, sum));
                 }
             }
-            catch { }
+            catch { } // silent: 5s hot poll, partial snapshot still returned
             return top;
         }
 
@@ -213,9 +213,9 @@ public static class Heuristics
         public void Dispose()
         {
             foreach (var c in _counters.Values)
-                try { c.Dispose(); } catch { }
+                try { c.Dispose(); } catch { } // silent: teardown must never throw
             _counters.Clear();
-            try { GC.SuppressFinalize(this); } catch { }
+            try { GC.SuppressFinalize(this); } catch { } // silent: teardown must never throw
         }
     }
 }

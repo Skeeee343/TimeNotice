@@ -265,6 +265,7 @@
                         <ComboBox x:Name="ConfirmActionBox" Margin="0,4,0,4">
                             <ComboBoxItem Content="Accept — track the game" Tag="Accept"/>
                             <ComboBoxItem Content="Reject — ignore it" Tag="Reject"/>
+                            <ComboBoxItem Content="Do nothing — ask again" Tag="DoNothing"/>
                         </ComboBox>
                     </StackPanel>
                     </Border>

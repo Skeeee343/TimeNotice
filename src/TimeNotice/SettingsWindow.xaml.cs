@@ -24,7 +24,7 @@ public partial class SettingsWindow : Window
     {
         InitializeComponent();
         Icon = AppIcon.CreateWindowIcon();
-        try { VersionText.Text = $"v{System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "?"}"; } catch { }
+        try { VersionText.Text = $"v{System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "?"}"; } catch { } // silent: cosmetic version label only
         _settings = settings;
         _onSaved = onSaved;
         _detectStatus = detectStatus;
@@ -137,7 +137,7 @@ public partial class SettingsWindow : Window
     // The old flow auto-saved, so a bare close discarding edits surprises. Prompt instead.
     private void OnClosing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
-        try { _previewTimer.Stop(); } catch { }
+        try { _previewTimer.Stop(); } catch { } // silent: teardown must never throw
         if (_explicitCancel || !_dirty) return;
         var answer = System.Windows.MessageBox.Show("Save your changes?", "TimeNotice Settings",
             MessageBoxButton.YesNoCancel, MessageBoxImage.Question);
@@ -179,7 +179,7 @@ public partial class SettingsWindow : Window
     {
         if (string.IsNullOrWhiteSpace(text)) return false;
         try { System.Windows.Media.ColorConverter.ConvertFromString(text.Trim()); return true; }
-        catch { return false; }
+        catch { return false; } // silent: validation probe, false means invalid color
     }
 
     private void UpdateWarning()
@@ -232,13 +232,13 @@ public partial class SettingsWindow : Window
     private void RefreshDetectStatus()
     {
         try { DetectStatusText.Text = _detectStatus?.Invoke() ?? "Status unavailable."; }
-        catch { }
+        catch { DetectStatusText.Text = "Status unavailable."; } // fail-safe: read-only label never blanks
         try
         {
             var exe = _lastFocus?.Invoke();
             ClassifyTargetText.Text = string.IsNullOrWhiteSpace(exe) ? "none yet — focus an app first" : exe;
         }
-        catch { }
+        catch { ClassifyTargetText.Text = "none yet — focus an app first"; } // fail-safe: read-only label never blanks
     }
 
     // Live list sync: entries added elsewhere while open (confirm prompt,
@@ -253,7 +253,7 @@ public partial class SettingsWindow : Window
             AppendMissing(IgnoreBox, _settings.IgnoreExes, _openedIgnore);
             AppendMissing(QuietBox, _settings.QuietModeExes, _openedQuiet);
         }
-        catch { }
+        catch { } // silent: 1s timer hot path, next tick retries the sync
         finally { _syncing = false; }
     }
 
@@ -284,7 +284,7 @@ public partial class SettingsWindow : Window
     private void Classify(string target)
     {
         try { ClassifyReceiptText.Text = _classifyFocus?.Invoke(target) ?? "Classify unavailable."; }
-        catch { }
+        catch (Exception ex) { ClassifyReceiptText.Text = "Classify unavailable."; Logger.Log($"src=settings classify-failed target={target} err={ex.GetType().Name}"); }
     }
 
     // Gaming-PC troubleshooting (issue #10): one click copies version +
@@ -307,7 +307,7 @@ public partial class SettingsWindow : Window
     private void Test(string kind)
     {
         try { _testPopup?.Invoke(kind); }
-        catch { }
+        catch (Exception ex) { Logger.Log($"src=settings test-popup-failed kind={kind} err={ex.GetType().Name}"); }
     }
 
     // Beta-debug log helpers (#11): moved here from the tray so Exit stays visible.
@@ -318,13 +318,13 @@ public partial class SettingsWindow : Window
             System.IO.Directory.CreateDirectory(Settings.Dir);
             System.Diagnostics.Process.Start("explorer.exe", Settings.Dir);
         }
-        catch { }
+        catch (Exception ex) { Logger.Log($"src=settings open-logs-failed err={ex.GetType().Name}"); }
     }
 
     private void ClearLog_Click(object sender, RoutedEventArgs e)
     {
         try { Logger.Clear(); }
-        catch { }
+        catch { } // silent: Logger.Clear is already fail-silent by design
     }
 
     private static int LiveInt(string? text, int fallback)
@@ -383,6 +383,8 @@ public partial class SettingsWindow : Window
             var secs = timeout; // static sample: no reason to burn a ticking countdown in a preview
             var cSub = timeoutAction.Equals("Reject", StringComparison.OrdinalIgnoreCase)
                 ? $"Ctrl+Alt+Z — Accept\nCtrl+Alt+X — Reject (auto in {secs}s)"
+                : timeoutAction.Equals("DoNothing", StringComparison.OrdinalIgnoreCase)
+                ? $"Ctrl+Alt+Z — Accept\nCtrl+Alt+X — Reject\nTimeout — ask again, nothing saved ({secs}s)"
                 : $"Ctrl+Alt+Z — Accept (auto in {secs}s)\nCtrl+Alt+X — Reject";
             SetPreview(PvConfirmBorder, PvConfirmMain, PvConfirmSub, cMain, cSub, cExe, PvConfirmExe);
             SetPreview(PvAcceptBorder, PvAcceptMain, PvAcceptSub,
@@ -394,7 +396,7 @@ public partial class SettingsWindow : Window
             var liveSub = (ShowNextBox.IsChecked == true ? (SubTemplateBox.Text ?? "") : "").Replace("{time}", nowStr).Replace("{next}", nextStr).Replace("{game}", "").Replace("{elapsed}", "").Replace("{interval}", gShow.ToString());
             SetPreview(PvInlineBorder, PvInlineMain, PvInlineSub, liveMain, liveSub);
         }
-        catch { }
+        catch { } // silent: 1s timer hot path, next tick redraws the previews
     }
 
     private void SetPreview(System.Windows.Controls.Border border, System.Windows.Controls.TextBlock main, System.Windows.Controls.TextBlock sub, string mainText, string subText, string exeText = "", System.Windows.Controls.TextBlock? exeBlock = null)
@@ -427,6 +429,8 @@ public partial class SettingsWindow : Window
         sub.Foreground = new System.Windows.Media.SolidColorBrush(OverlayWindow.ParseColor(tsg, "#FFBBBBBB"));
         if (exeBlock is not null) exeBlock.Foreground = sub.Foreground;
         // Preview reads the live sliders so box/text fade separately, like the real popup.
+        // Box opacity is baked into the fill alpha only; the Border stays at 1.0
+        // so the text keeps its own opacity (#35).
         var boxOp = OpacitySlider.Value / 100.0;
         if (boxOp <= 0) boxOp = _settings.Opacity;
         boxOp = Math.Clamp(boxOp, 0.2, 1.0);
@@ -434,16 +438,14 @@ public partial class SettingsWindow : Window
         if (boxOff)
         {
             border.Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Colors.Transparent);
-            border.Opacity = 1.0;
         }
-        else if (boxOp >= 1.0)
+        else
         {
-            // 100% means fully blocked out, like the real popup.
-            var solid = OverlayWindow.ParseColor(tbg, "#CC1E1E1E"); solid.A = 255;
-            border.Background = new System.Windows.Media.SolidColorBrush(solid);
-            border.Opacity = 1.0;
+            var fill = OverlayWindow.ParseColor(tbg, "#CC1E1E1E");
+            fill.A = boxOp >= 1.0 ? (byte)255 : (byte)Math.Clamp(fill.A * boxOp, 0, 255); // 100% still fully blocks out (#28)
+            border.Background = new System.Windows.Media.SolidColorBrush(fill);
         }
-        else border.Opacity = boxOp;
+        border.Opacity = 1.0;
         var textOp = TextOpacitySlider.Value / 100.0;
         if (textOp <= 0) textOp = _settings.TextOpacity;
         textOp = Math.Clamp(textOp, 0.2, 1.0);
@@ -470,12 +472,12 @@ public partial class SettingsWindow : Window
                 var c = OverlayWindow.ParseColor(current, "#FFFFFFFF");
                 dlg.Color = System.Drawing.Color.FromArgb(c.R, c.G, c.B);
             }
-            catch { }
+            catch { } // silent: fall back to the dialog's default color
             if (dlg.ShowDialog() != System.Windows.Forms.DialogResult.OK) return;
             var picked = $"{dlg.Color.R:X2}{dlg.Color.G:X2}{dlg.Color.B:X2}";
             box.Text = current.StartsWith("#") && current.Length == 7 ? $"#{picked}" : $"#{alpha}{picked}"; // keep #RRGGBB style if they used it
         }
-        catch { }
+        catch { } // silent: best-effort color picker, box keeps its old text
     }
 
     private void Save_Click(object sender, RoutedEventArgs e)
@@ -503,7 +505,7 @@ public partial class SettingsWindow : Window
             return;
         }
         var confirmAction = SelectedTag(ConfirmActionBox);
-        if (confirmAction is not ("Accept" or "Reject")) confirmAction = "Accept";
+        if (confirmAction is not ("Accept" or "Reject" or "DoNothing")) confirmAction = "Accept";
         if (!TimeSpan.TryParse(WindowStartBox.Text.Trim(), out _))
         {
             ErrorText.Text = "From time must look like 09:00.";

@@ -19,7 +19,7 @@ public static class NotificationPolicy
     public static IntPtr ForegroundWindowHandle()
     {
         try { return GetForegroundWindow(); }
-        catch { return IntPtr.Zero; }
+        catch { return IntPtr.Zero; } // silent: per-tick call, fail-open means no foreground window
     }
 
     public static string? ForegroundWindowText()
@@ -31,7 +31,7 @@ public static class NotificationPolicy
             var sb = new System.Text.StringBuilder(512);
             return GetWindowText(hwnd, sb, sb.Capacity) > 0 ? sb.ToString() : null;
         }
-        catch { return null; }
+        catch { return null; } // silent: per-tick call, fail-open means no title
     }
 
     // Own binary under any filename: a browser-renamed download
@@ -43,13 +43,13 @@ public static class NotificationPolicy
     private static string SelfFile()
     {
         try { return System.IO.Path.GetFileName(Environment.ProcessPath) ?? "TimeNotice.exe"; }
-        catch { return "TimeNotice.exe"; }
+        catch { return "TimeNotice.exe"; } // silent: startup path, fail-open keeps self-detection working
     }
 
     private static string SelfName()
     {
         try { return Process.GetCurrentProcess().ProcessName + ".exe"; }
-        catch { return "TimeNotice.exe"; }
+        catch { return "TimeNotice.exe"; } // silent: startup path, fail-open keeps self-detection working
     }
 
     public static bool IsSelf(string? exe)
@@ -79,24 +79,25 @@ public static class NotificationPolicy
                 var sb = new System.Text.StringBuilder(256);
                 title = GetWindowText(hwnd, sb, sb.Capacity) > 0 ? sb.ToString() : null;
             }
-            catch { }
+            catch { } // silent: title is best-effort, exe resolution continues without it
             try
             {
                 using var p = Process.GetProcessById((int)pid);
                 // MainModule throws for elevated / anti-cheat-protected games: fall
                 // back to ProcessName so focus never reads as null (stuck last-focus).
+                // Nested fallback by design: each level degrades the Source tag.
                 try
                 {
                     var file = p.MainModule?.FileName;
                     if (!string.IsNullOrEmpty(file)) return (Path.GetFileName(file), pid, title, "module");
                 }
-                catch { }
+                catch { } // silent: elevated/protected process, fall through to name
                 try { return (p.ProcessName + ".exe", pid, title, "name"); }
-                catch { return (null, pid, title, "unresolved"); }
+                catch { return (null, pid, title, "unresolved"); } // silent: exited mid-read
             }
-            catch { return (null, pid, title, "unresolved"); }
+            catch { return (null, pid, title, "unresolved"); } // silent: per-tick call, pid vanished
         }
-        catch { return (null, 0, null, "unresolved"); }
+        catch { return (null, 0, null, "unresolved"); } // silent: per-tick call, fail-open means unknown focus
     }
 
     public static bool ShouldSuppress(string? exe, Settings s)
