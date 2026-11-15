@@ -166,3 +166,5 @@ with no database, an invisible untracked clock is unobservable, so it added noth
 2. `git pull` (or copy folder), then build/run commands above
 3. Tray icon → Test reminder. Edit settings at `%AppData%/TimeNotice/settings.json`
 4. Append a row to Session log above with pass/fail before next session.
+| 2026-11-15 | Windows | Taskbar freeze: killed TimeNotice /F (OnExplicitShutdown ignores gentle close), restarted shell hosts + explorer (14-day PID 10860 328MB -> fresh 210MB), all shells healthy. Filed #43 + fixed: second launch signals running copy via Local\TimeNotice-exit event and takes over (5s retry), --exit flag for scripts; live-verified takeover (single PID throughout, signalled-running in log) + --exit quits cleanly; build 0 warn 0 err | Fixed, uncommitted; app left stopped for user to relaunch |
+| 2026-11-15 | Windows | Added COLLABORATOR.md (build/release commands, repo map, contributor workflow) + README link; committed #43 takeover fix + doc together; `dotnet build` 0 warn 0 err, pushed to origin/main | Committed + pushed |

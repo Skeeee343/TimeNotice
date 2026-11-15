@@ -54,3 +54,4 @@ Release binary (self-contained single exe, what the betas ship): `dotnet publish
 - `SCOPE.md` — what V1 is and is not
 - `PROGRESS.md` — cross-machine build log and phase gates
 - `AGENTS.md` — how agents work in this repo
+- `COLLABORATOR.md` — build/release commands, repo map, how to contribute
