@@ -128,7 +128,7 @@ public partial class App : System.Windows.Application
     {
         if (_settingsWindow is null)
         {
-            _settingsWindow = new SettingsWindow(_settings, () => { ApplyStartup(); StartScheduler(); }, GameDisplayName, DetectionStatus, LastFocusExe, ClassifyLastFocus, TestPopup);
+            _settingsWindow = new SettingsWindow(_settings, () => { ApplyStartup(); StartScheduler(); }, DetectionStatus, LastFocusExe, ClassifyLastFocus, TestPopup);
             _settingsWindow.Closed += (_, _) => _settingsWindow = null;
         }
         if (_settingsWindow.WindowState == WindowState.Minimized) _settingsWindow.WindowState = WindowState.Normal;

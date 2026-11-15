@@ -286,7 +286,7 @@
             <TabItem Header="Previews">
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                 <StackPanel Margin="8">
-                    <TextBlock Text="Live samples of every popup, reflecting unsaved edits. Read-only — the scheduler is untouched. Game name is the first live Games line (real popup names the focused/session game); elapsed counts from when Settings was opened." Style="{StaticResource Hint}"/>
+                    <TextBlock Text="Live samples of every popup, reflecting unsaved edits. Read-only — the scheduler is untouched. Game name is the standard Test game example (real popup names the focused/session game); elapsed counts from when Settings was opened." Style="{StaticResource Hint}"/>
                     <TextBlock Text="1 · General reminder" Style="{StaticResource FieldLabel}"/>
                     <Border x:Name="PvGeneralBorder" CornerRadius="10" Padding="14,10" Margin="0,4,0,4" MaxWidth="320" HorizontalAlignment="Left">
                         <StackPanel>

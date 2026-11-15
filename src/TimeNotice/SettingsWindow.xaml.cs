@@ -7,7 +7,6 @@ public partial class SettingsWindow : Window
 {
     private readonly Settings _settings;
     private readonly Action _onSaved;
-    private readonly Func<string, string> _gameDisplay; // App's display resolver (user mapping + catalog + Title-case)
     private readonly Func<string>? _detectStatus; // App's live detector readout (issue #9), null when unavailable
     private readonly Func<string?>? _lastFocus; // App's last non-self focus, shown before classifying (#11)
     private readonly Func<string, string>? _classifyFocus; // App's classify-last-focus, returns a receipt line
@@ -21,14 +20,13 @@ public partial class SettingsWindow : Window
     private readonly System.Windows.Threading.DispatcherTimer _previewTimer = new() { Interval = TimeSpan.FromSeconds(1) };
     private readonly DateTime _previewOpenedUtc = DateTime.UtcNow;
 
-    public SettingsWindow(Settings settings, Action onSaved, Func<string, string> gameDisplay, Func<string>? detectStatus = null, Func<string?>? lastFocus = null, Func<string, string>? classifyFocus = null, Action<string>? testPopup = null)
+    public SettingsWindow(Settings settings, Action onSaved, Func<string>? detectStatus = null, Func<string?>? lastFocus = null, Func<string, string>? classifyFocus = null, Action<string>? testPopup = null)
     {
         InitializeComponent();
         Icon = AppIcon.CreateWindowIcon();
         try { VersionText.Text = $"v{System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "?"}"; } catch { }
         _settings = settings;
         _onSaved = onSaved;
-        _gameDisplay = gameDisplay;
         _detectStatus = detectStatus;
         _lastFocus = lastFocus;
         _classifyFocus = classifyFocus;
@@ -337,8 +335,9 @@ public partial class SettingsWindow : Window
     // Previews tab: live read-only samples of every popup, expanded exactly like
     // App.ShowTest/ShowDetect/ConfirmPrompt so what you see is what will fire.
     // Reads the live boxes (unsaved edits included). Placeholders by design, kept
-    // to 3: game name (first live Games line), elapsed (counts from window open),
-    // Align anchor (real popup anchors on its last fire when still ahead).
+    // to 3: game name (fixed Test game example, like the manual test), elapsed
+    // (counts from window open), Align anchor (real popup anchors on its last
+    // fire when still ahead).
     private void RefreshPreviews()
     {
         try
@@ -358,27 +357,10 @@ public partial class SettingsWindow : Window
             var nextStr = gNext.ToString("h:mm tt");
             var gameNext = nowLocal.AddMinutes(ymins).ToString("h:mm tt");
             var elapsed = App.FormatElapsed(DateTime.UtcNow - _previewOpenedUtc); // sample session clock
-            // Placeholder name from the live Games box; the real popup names the
-            // focused/session game, the manual test always uses Test game.
-            string exe = "newgame.exe";
-            foreach (var line in (GameBox.Text ?? "").Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
-            {
-                var text = line ?? "";
-                var eq = text.IndexOf('=');
-                var e = (eq < 0 ? text : text[..eq]).Trim();
-                if (e.Length > 0) { exe = e; break; }
-            }
-            if (exe == "newgame.exe")
-            {
-                foreach (var line in _settings.GameExes)
-                {
-                    var text = line ?? "";
-                    var eq = text.IndexOf('=');
-                    var e = (eq < 0 ? text : text[..eq]).Trim();
-                    if (e.Length > 0) { exe = e; break; }
-                }
-            }
-            var display = _gameDisplay(exe);
+            // Fixed example like the manual Test game popup; the real popup names
+            // the focused/session game, so previews never leak the Games list.
+            const string exe = "test-game.exe";
+            const string display = "Test game";
             var timeout = Math.Clamp(LiveInt(ConfirmTimeoutBox.Text, _settings.ConfirmTimeoutSeconds), 5, 120);
             var timeoutAction = SelectedTag(ConfirmActionBox);
             if (string.IsNullOrWhiteSpace(timeoutAction)) timeoutAction = _settings.ConfirmTimeoutAction;
