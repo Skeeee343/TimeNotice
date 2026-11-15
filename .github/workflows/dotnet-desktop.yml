@@ -44,6 +44,10 @@ on:
   pull_request:
     branches: [ "main" ]
 
+defaults:
+  run:
+    workingDirectory: ${{ github.workspace }}  # The default working directory is the root of the repository.
+
 jobs:
 
   build:
