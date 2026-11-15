@@ -59,8 +59,7 @@ jobs:
       workingDirectory: ${{ github.workspace }}  # The default working directory is the root of the repository.
       Solution_Name: src\TimeNotice\TimeNotice.sln                         # Replace with your solution name, i.e. MyWpfApp.sln.
       Test_Project_Path: src\TimeNotice\TimeNotice.csproj                 # Replace with the path to your test project, i.e. MyWpfApp.Tests\MyWpfApp.Tests.csproj.
-      Wap_Project_Directory: src\TimeNotice\WapProj    # Replace with the Wap project directory relative to the solution, i.e. MyWpfApp.Package.
-      Wap_Project_Path: src\TimeNotice\WapProj\WapProj.wapproj                   # Replace with the path to your Wap project, i.e. MyWpf.App.Package\MyWpfApp.Package.wapproj.
+      Solution_Folder: src\TimeNotice\                                      # Replace with the path to your solution folder, i.e. MyWpfApp. 
 
     steps:
     - name: Checkout
@@ -78,39 +77,25 @@ jobs:
     - name: Setup MSBuild.exe
       uses: microsoft/setup-msbuild@v2
 
+    # Restore the solution
+    - name: Restore the solution
+      run: dotnet restore {{ env.SolutionFolder}}
+
+    # Build the solution
+    - name: Build the solution
+      run: dotnet build --configuration ${{ matrix.configuration }} ${{ env.SolutionFolder }}
+
     # Execute all unit tests in the solution
     - name: Execute unit tests
-      run: dotnet test src/TimeNotice/
+      run: dotnet test {{ env.SolutionFolder}}
+  
+    # Publish Folder
+    - name: Publish the application
+      run: dotnet publish ${{ env.SolutionFolder}} --configuration ${{ matrix.configuration }} -p:PublishSingleFile=true -p:SelfContained=true --output ${{ env.workingDirectory}}\publish
 
-    # Restore the application to populate the obj folder with RuntimeIdentifiers
-    - name: Restore the application
-      run: msbuild $env:Solution_Name /t:Restore /p:Configuration=$env:Configuration
-      env:
-        Configuration: ${{ matrix.configuration }}
-
-    # Decode the base 64 encoded pfx and save the Signing_Certificate
-    - name: Decode the pfx
-      run: |
-        $pfx_cert_byte = [System.Convert]::FromBase64String("${{ secrets.Base64_Encoded_Pfx }}")
-        $certificatePath = Join-Path -Path $env:Wap_Project_Directory -ChildPath GitHubActionsWorkflow.pfx
-        [IO.File]::WriteAllBytes("$certificatePath", $pfx_cert_byte)
-
-    # Create the app package by building and packaging the Windows Application Packaging project
-    - name: Create the app package
-      run: msbuild $env:Wap_Project_Path /p:Configuration=$env:Configuration /p:UapAppxPackageBuildMode=$env:Appx_Package_Build_Mode /p:AppxBundle=$env:Appx_Bundle /p:PackageCertificateKeyFile=GitHubActionsWorkflow.pfx /p:PackageCertificatePassword=${{ secrets.Pfx_Key }}
-      env:
-        Appx_Bundle: Always
-        Appx_Bundle_Platforms: x86|x64
-        Appx_Package_Build_Mode: StoreUpload
-        Configuration: ${{ matrix.configuration }}
-
-    # Remove the pfx
-    - name: Remove the pfx
-      run: Remove-Item -path $env:Wap_Project_Directory\GitHubActionsWorkflow.pfx
-
-    # Upload the MSIX package: https://github.com/marketplace/actions/upload-a-build-artifact
-    - name: Upload build artifacts
-      uses: actions/upload-artifact@v4
+    # Upload
+    - name: Upload artifact
+      uses: actions/upload-artifact@v3
       with:
-        name: MSIX Package
-        path: ${{ env.Wap_Project_Directory }}\AppPackages
+        name: TimeNotice-${{ matrix.configuration }}
+    
