@@ -182,8 +182,7 @@ public partial class OverlayWindow : Window
                     // so divide by OUR scale (150% text = 144 dpi, so 1920px = 1280 units).
                     // Never the focused game's DPI: a DPI-unaware game (javaw.exe = 96)
                     // would give scale 1 and push the corner off-screen.
-                    double scale = 1.0;
-                    try { scale = System.Windows.Media.VisualTreeHelper.GetDpi(this).DpiScaleX; } catch { } // silent: fail-safe to scale 1.0 below
+                    var scale = GetDpiScale();
                     if (scale <= 0) scale = 1.0;
                     var tl = new System.Windows.Point(mi.rcWork.Left / scale, mi.rcWork.Top / scale);
                     var br = new System.Windows.Point(mi.rcWork.Right / scale, mi.rcWork.Bottom / scale);
@@ -191,7 +190,10 @@ public partial class OverlayWindow : Window
                 }
             }
         }
-        catch { } // fail-safe: primary WorkArea above
+        catch (Exception ex)
+        {
+            Logger.Log($"src=overlay-position-failed err={ex.GetType().Name}");
+        } // fail-safe: primary WorkArea above
         var w = ActualWidth > 0 ? ActualWidth : Width; // ponytail: SizeToContent makes Height auto, so anchor on rendered size
         var h = ActualHeight > 0 ? ActualHeight : 90;
         var pos = (_settings.Position ?? "BottomRight").Trim();
@@ -215,6 +217,12 @@ public partial class OverlayWindow : Window
             Left = area.Right - w - 24;
             Top = area.Bottom - h - 24;
         }
+    }
+
+    private double GetDpiScale()
+    {
+        try { return System.Windows.Media.VisualTreeHelper.GetDpi(this).DpiScaleX; }
+        catch { return 1.0; } // silent: fail-safe to scale 1.0
     }
 
     private void FadeOut()

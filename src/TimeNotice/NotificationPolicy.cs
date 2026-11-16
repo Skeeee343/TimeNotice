@@ -43,13 +43,21 @@ public static class NotificationPolicy
     private static string SelfFile()
     {
         try { return System.IO.Path.GetFileName(Environment.ProcessPath) ?? "TimeNotice.exe"; }
-        catch { return "TimeNotice.exe"; } // silent: startup path, fail-open keeps self-detection working
+        catch (Exception ex)
+        {
+            Logger.Log($"src=foreground self-file-failed err={ex.GetType().Name}");
+            return "TimeNotice.exe";
+        }
     }
 
     private static string SelfName()
     {
         try { return Process.GetCurrentProcess().ProcessName + ".exe"; }
-        catch { return "TimeNotice.exe"; } // silent: startup path, fail-open keeps self-detection working
+        catch (Exception ex)
+        {
+            Logger.Log($"src=foreground self-name-failed err={ex.GetType().Name}");
+            return "TimeNotice.exe";
+        }
     }
 
     public static bool IsSelf(string? exe)
@@ -68,36 +76,51 @@ public static class NotificationPolicy
     // produced the name. Source is "module", "name", or "unresolved".
     public static (string? Exe, uint Pid, string? Title, string Source) ForegroundDiag()
     {
+        var hwnd = ForegroundWindowHandle();
+        if (hwnd == IntPtr.Zero) return (null, 0, null, "unresolved");
+        uint pid;
         try
         {
-            var hwnd = GetForegroundWindow();
-            if (hwnd == IntPtr.Zero) return (null, 0, null, "unresolved");
-            GetWindowThreadProcessId(hwnd, out var pid);
-            string? title = null;
-            try
-            {
-                var sb = new System.Text.StringBuilder(256);
-                title = GetWindowText(hwnd, sb, sb.Capacity) > 0 ? sb.ToString() : null;
-            }
-            catch { } // silent: title is best-effort, exe resolution continues without it
-            try
-            {
-                using var p = Process.GetProcessById((int)pid);
-                // MainModule throws for elevated / anti-cheat-protected games: fall
-                // back to ProcessName so focus never reads as null (stuck last-focus).
-                // Nested fallback by design: each level degrades the Source tag.
-                try
-                {
-                    var file = p.MainModule?.FileName;
-                    if (!string.IsNullOrEmpty(file)) return (Path.GetFileName(file), pid, title, "module");
-                }
-                catch { } // silent: elevated/protected process, fall through to name
-                try { return (p.ProcessName + ".exe", pid, title, "name"); }
-                catch { return (null, pid, title, "unresolved"); } // silent: exited mid-read
-            }
-            catch { return (null, pid, title, "unresolved"); } // silent: per-tick call, pid vanished
+            GetWindowThreadProcessId(hwnd, out pid);
         }
         catch { return (null, 0, null, "unresolved"); } // silent: per-tick call, fail-open means unknown focus
+
+        return ResolveForegroundProcess(pid, TryGetWindowTitle(hwnd));
+    }
+
+    private static string? TryGetWindowTitle(IntPtr hwnd)
+    {
+        try
+        {
+            var sb = new System.Text.StringBuilder(256);
+            return GetWindowText(hwnd, sb, sb.Capacity) > 0 ? sb.ToString() : null;
+        }
+        catch { return null; } // silent: per-tick title is best-effort
+    }
+
+    private static (string? Exe, uint Pid, string? Title, string Source) ResolveForegroundProcess(uint pid, string? title)
+    {
+        try
+        {
+            using var process = Process.GetProcessById((int)pid);
+            var file = TryGetModuleFileName(process);
+            if (!string.IsNullOrEmpty(file)) return (Path.GetFileName(file), pid, title, "module");
+            var name = TryGetProcessName(process);
+            return name is null ? (null, pid, title, "unresolved") : (name + ".exe", pid, title, "name");
+        }
+        catch { return (null, pid, title, "unresolved"); } // silent: per-tick call, pid vanished
+    }
+
+    private static string? TryGetModuleFileName(Process process)
+    {
+        try { return process.MainModule?.FileName; }
+        catch { return null; } // silent: elevated/protected process falls back to its name
+    }
+
+    private static string? TryGetProcessName(Process process)
+    {
+        try { return process.ProcessName; }
+        catch { return null; } // silent: per-tick call, process exited mid-read
     }
 
     public static bool ShouldSuppress(string? exe, Settings s)

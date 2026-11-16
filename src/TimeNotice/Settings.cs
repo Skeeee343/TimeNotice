@@ -90,7 +90,11 @@ public sealed class Settings
             File.Copy(Path, backup, overwrite: false);
             return backup;
         }
-        catch { return null; } // silent: backup is best-effort, defaults load regardless
+        catch (Exception ex)
+        {
+            Logger.Log($"src=config-backup-failed err={ex.GetType().Name}");
+            return null;
+        }
     }
 
     public static Settings Load()
@@ -109,8 +113,9 @@ public sealed class Settings
                 return SeedDefaults();
             }
         }
-        catch
+        catch (Exception ex)
         {
+            Logger.Log($"src=config-load-failed err={ex.GetType().Name}");
             // ponytail: corrupt config keeps a backup for diagnosis, then falls back to defaults
             return SeedWithReset(TryBackupCorrupt());
         }

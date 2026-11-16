@@ -103,7 +103,11 @@ public static class Heuristics
                 var _ = new System.Diagnostics.PerformanceCounterCategory("GPU Engine");
                 Available = true; // category exists; per-pid instances resolved per sample
             }
-            catch { Available = false; } // no GPU counters (VM): fullscreen path still works
+            catch (Exception ex)
+            {
+                Available = false;
+                Logger.Log($"src=gpu unavailable err={ex.GetType().Name}");
+            }
             finally { Probed = true; }
         }
 
@@ -126,12 +130,26 @@ public static class Heuristics
                 {
                     if (!name.Contains(tag, StringComparison.OrdinalIgnoreCase)) continue;
                     matched++;
-                    try { sum += c.NextValue(); } catch { } // silent: 5s hot poll, skip dead counter
+                    if (TryReadCounter(c, out var value)) sum += value;
                 }
                 if (matched == 0) return null;
                 return sum;
             }
             catch { return null; } // silent: 5s hot poll, unknown reads as no GPU, never as 0%
+        }
+
+        private static bool TryReadCounter(System.Diagnostics.PerformanceCounter counter, out float value)
+        {
+            try
+            {
+                value = counter.NextValue();
+                return true;
+            }
+            catch
+            {
+                value = 0;
+                return false;
+            } // silent: 5s hot poll, skip dead counter
         }
 
         private void Refresh(string tag)
@@ -182,21 +200,29 @@ public static class Heuristics
                 {
                     var pid = ParsePid(name);
                     if (pid is null) continue;
-                    double v;
-                    try { v = c.NextValue(); } catch { continue; } // silent: 5s hot poll, skip dead counter
+                    if (!TryReadCounter(c, out var v)) continue;
                     sums[pid.Value] = sums.GetValueOrDefault(pid.Value) + v;
                 }
                 foreach (var (pid, sum) in sums.OrderByDescending(kv => kv.Value).Take(Math.Max(1, count)))
                 {
                     if (sum <= 0) continue;
-                    string exe;
-                    try { using var p = System.Diagnostics.Process.GetProcessById((int)pid); exe = p.ProcessName + ".exe"; }
-                    catch { continue; } // exited between sample and resolve
+                    var exe = TryGetProcessName(pid);
+                    if (exe is null) continue;
                     top.Add((pid, exe, sum));
                 }
             }
             catch { } // silent: 5s hot poll, partial snapshot still returned
             return top;
+        }
+
+        private static string? TryGetProcessName(uint pid)
+        {
+            try
+            {
+                using var process = System.Diagnostics.Process.GetProcessById((int)pid);
+                return process.ProcessName + ".exe";
+            }
+            catch { return null; } // silent: 5s hot poll, process exited between sample and resolve
         }
 
         private static uint? ParsePid(string instance)

@@ -24,7 +24,8 @@ public partial class SettingsWindow : Window
     {
         InitializeComponent();
         Icon = AppIcon.CreateWindowIcon();
-        try { VersionText.Text = $"v{System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "?"}"; } catch { } // silent: cosmetic version label only
+        try { VersionText.Text = $"v{System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "?"}"; }
+        catch (Exception ex) { Logger.Log($"src=settings version-label-failed err={ex.GetType().Name}"); } // cosmetic fallback
         _settings = settings;
         _onSaved = onSaved;
         _detectStatus = detectStatus;
@@ -297,7 +298,11 @@ public partial class SettingsWindow : Window
             System.Windows.Clipboard.SetText($"TimeNotice v{ver}\n{DetectStatusText.Text}");
             CopyReceiptText.Text = "Copied — paste it back to me.";
         }
-        catch { CopyReceiptText.Text = "Copy failed — screenshot the text above instead."; }
+        catch (Exception ex)
+        {
+            CopyReceiptText.Text = "Copy failed — screenshot the text above instead.";
+            Logger.Log($"src=settings clipboard-copy-failed err={ex.GetType().Name}");
+        }
     }
 
     private void TestGeneral_Click(object sender, RoutedEventArgs e) => Test("general");
@@ -323,8 +328,7 @@ public partial class SettingsWindow : Window
 
     private void ClearLog_Click(object sender, RoutedEventArgs e)
     {
-        try { Logger.Clear(); }
-        catch { } // silent: Logger.Clear is already fail-silent by design
+        Logger.Clear(); // Logger handles its own write failures.
     }
 
     private static int LiveInt(string? text, int fallback)
@@ -467,17 +471,13 @@ public partial class SettingsWindow : Window
             string alpha = "FF";
             if (current.StartsWith("#") && current.Length == 9) alpha = current.Substring(1, 2); // #AARRGGBB
             using var dlg = new System.Windows.Forms.ColorDialog { FullOpen = true };
-            try
-            {
-                var c = OverlayWindow.ParseColor(current, "#FFFFFFFF");
-                dlg.Color = System.Drawing.Color.FromArgb(c.R, c.G, c.B);
-            }
-            catch { } // silent: fall back to the dialog's default color
+            var c = OverlayWindow.ParseColor(current, "#FFFFFFFF");
+            dlg.Color = System.Drawing.Color.FromArgb(c.R, c.G, c.B);
             if (dlg.ShowDialog() != System.Windows.Forms.DialogResult.OK) return;
             var picked = $"{dlg.Color.R:X2}{dlg.Color.G:X2}{dlg.Color.B:X2}";
             box.Text = current.StartsWith("#") && current.Length == 7 ? $"#{picked}" : $"#{alpha}{picked}"; // keep #RRGGBB style if they used it
         }
-        catch { } // silent: best-effort color picker, box keeps its old text
+        catch (Exception ex) { Logger.Log($"src=settings color-picker-failed err={ex.GetType().Name}"); }
     }
 
     private void Save_Click(object sender, RoutedEventArgs e)

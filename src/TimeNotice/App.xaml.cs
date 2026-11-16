@@ -26,7 +26,10 @@ public partial class App : System.Windows.Application
         // (its OnExit removes the tray icon), waits, and takes over. Falls back
         // to silent exit when the running copy cannot be signalled (#43).
         try { _singleInstance = new Mutex(true, @"Local\TimeNotice-single", out var owned); if (!owned && !TakeoverFromRunning()) { Shutdown(); return; } }
-        catch { /* fail-open: single user, second copy just runs */ }
+        catch (Exception ex)
+        {
+            Logger.Log($"src=single-instance start-failed err={ex.GetType().Name}");
+        } // fail-open: single user, second copy just runs
         StartExitWatcher(); // first copy: a later launch or --exit shuts us down cleanly
         DispatcherUnhandledException += (_, args) =>
         {
@@ -130,7 +133,11 @@ public partial class App : System.Windows.Application
     private static bool HasExitArg(string[] args)
     {
         try { return args.Any(a => a.Equals("--exit", StringComparison.OrdinalIgnoreCase)); }
-        catch { return false; } // fail-safe: unreadable args means start normally
+        catch (Exception ex)
+        {
+            Logger.Log($"src=startup args-read-failed err={ex.GetType().Name}");
+            return false;
+        } // fail-safe: unreadable args means start normally
     }
 
     private static void SignalRunningInstance()
@@ -610,33 +617,12 @@ public partial class App : System.Windows.Application
             // itself. The cached last non-self fg is the useful line.
             var lastFg = _lastNonSelfFg;
             _gpu ??= new Heuristics.GpuSampler();
-            string lastGpu;
-            try
-            {
-                double? sample = null;
-                if (!string.IsNullOrWhiteSpace(lastFg))
-                {
-                    var procName = lastFg.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ? lastFg[..^4] : lastFg;
-                    using var proc = System.Diagnostics.Process.GetProcessesByName(procName).FirstOrDefault();
-                    if (proc is not null) sample = _gpu.SampleSum((uint)proc.Id);
-                }
-                lastGpu = sample is null ? "n/a" : $"{sample:F0}%";
-            }
-            catch { lastGpu = "n/a"; } // fail-safe: read-only Detect label, n/a means no sample
+            var lastGpu = LastFocusGpuStatus(lastFg);
             var lastLine = string.IsNullOrWhiteSpace(lastFg) ? "none yet" : $"{lastFg} (GPU {lastGpu})";
-        // Live read (issue #10): pid + title + resolve source so a game that
-        // never appears in last-focus is provable (protected handle vs alias).
-        // Meaningless while Settings is open (live=self) — Last focus stays canonical.
-        string liveLine;
-        try
-        {
-            var (liveExe, livePid, liveTitle, liveSrc) = NotificationPolicy.ForegroundDiag();
-            var shortTitle = liveTitle is null ? "" : liveTitle.Length > 40 ? liveTitle[..40] + "…" : liveTitle;
-            liveLine = string.IsNullOrWhiteSpace(liveExe)
-                ? $"unresolved (pid {livePid}, via {liveSrc}) title=\"{shortTitle}\""
-                : $"{liveExe} (pid {livePid}, via {liveSrc}) title=\"{shortTitle}\"";
-        }
-        catch { liveLine = "unavailable"; } // fail-safe: read-only Detect label, unavailable means no live read
+            // Live read (issue #10): pid + title + resolve source so a game that
+            // never appears in last-focus is provable (protected handle vs alias).
+            // Meaningless while Settings is open (live=self) — Last focus stays canonical.
+            var liveLine = LiveForegroundStatus();
             string session = "none";
             if (!string.IsNullOrWhiteSpace(_gameSessionExe))
                 session = $"{GameDisplayName(_gameSessionExe)} — {FormatElapsed(DateTime.UtcNow - _gameSessionStart)}";
@@ -664,6 +650,32 @@ public partial class App : System.Windows.Application
             return status;
         }
         catch { return "Status unavailable."; } // fail-safe: read-only Detect label never throws
+    }
+
+    private string LastFocusGpuStatus(string? lastFg)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(lastFg)) return "n/a";
+            var procName = lastFg.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ? lastFg[..^4] : lastFg;
+            using var process = System.Diagnostics.Process.GetProcessesByName(procName).FirstOrDefault();
+            var sample = process is null ? null : _gpu?.SampleSum((uint)process.Id);
+            return sample is null ? "n/a" : $"{sample:F0}%";
+        }
+        catch { return "n/a"; } // silent: 5s read-only status refresh, no GPU sample is n/a
+    }
+
+    private static string LiveForegroundStatus()
+    {
+        try
+        {
+            var (liveExe, livePid, liveTitle, liveSrc) = NotificationPolicy.ForegroundDiag();
+            var shortTitle = liveTitle is null ? "" : liveTitle.Length > 40 ? liveTitle[..40] + "…" : liveTitle;
+            return string.IsNullOrWhiteSpace(liveExe)
+                ? $"unresolved (pid {livePid}, via {liveSrc}) title=\"{shortTitle}\""
+                : $"{liveExe} (pid {livePid}, via {liveSrc}) title=\"{shortTitle}\"";
+        }
+        catch { return "unavailable"; } // silent: 5s read-only status refresh, unavailable means no live read
     }
 
     private List<(uint Pid, string Exe, double Gpu)> _topSnap = new();
@@ -720,9 +732,7 @@ public partial class App : System.Windows.Application
                     using (p) // restore: Process holds a native handle; never leak one per 5s tick
                     {
                         any = true;
-                        DateTime start;
-                        try { start = p.StartTime.ToUniversalTime(); } // ponytail: UTC so DST shifts never move the session clock
-                        catch { start = _startCache.TryGetValue(exe, out var old) ? old : DateTime.UtcNow; } // elevated: reuse first-seen start, never reset to now each tick
+                        var start = ProcessStartTime(p, exe);
                         _startCache[exe] = start;
                         if (!found.TryGetValue(exe, out var cur) || start < cur)
                             found[exe] = start;
@@ -733,6 +743,12 @@ public partial class App : System.Windows.Application
             catch { } // silent: 5s hot poll, unknown exe means not running; tray hint covers it
         }
         return found;
+    }
+
+    private DateTime ProcessStartTime(System.Diagnostics.Process process, string exe)
+    {
+        try { return process.StartTime.ToUniversalTime(); } // ponytail: UTC so DST shifts never move the session clock
+        catch { return _startCache.TryGetValue(exe, out var old) ? old : DateTime.UtcNow; } // silent: 5s hot poll, elevated process reuses its cached start
     }
 
     internal static string FormatElapsed(TimeSpan span)
